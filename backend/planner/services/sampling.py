@@ -20,12 +20,29 @@ def interval_for(total_miles):
     return 50
 
 
-def sample_route(coords, duration_s, depart_utc):
+def perpendicular_point(a, b, base, miles, side=1):
+    """A point `miles` away from `base`, at a right angle to the line a -> b.
+
+    a, b, base are (lat, lon). side=1 is left of travel, -1 is right.
+    Uses a flat-earth approximation, which is fine for distances under ~100 miles.
+    """
+    cos_lat = math.cos(math.radians(base[0])) or 1e-9
+    dx = (b[1] - a[1]) * cos_lat          # east component
+    dy = b[0] - a[0]                      # north component
+    length = math.hypot(dx, dy) or 1e-9
+    px, py = -dy / length, dx / length    # unit vector pointing left of a -> b
+    degrees = miles / 69.0                # about 69 miles per degree of latitude
+    return (base[0] + side * py * degrees,
+            base[1] + side * px * degrees / cos_lat)
+
+
+def sample_route(coords, duration_s, depart_utc, step=None):
     """Return (checkpoints, total_miles).
 
     coords: [(lat, lon), ...] from the routing API
     duration_s: total drive time in seconds
     depart_utc: timezone-aware datetime in UTC
+    step: miles between checkpoints (None = choose by trip length)
 
     Each checkpoint: {lat, lon, mile, eta}
     """
@@ -39,7 +56,7 @@ def sample_route(coords, duration_s, depart_utc):
                  "mile": 0.0, "eta": depart_utc}], 0.0
 
     # 2. The distances (in miles) where we want checkpoints
-    step = interval_for(total)
+    step = step or interval_for(total)
     targets = [i * step for i in range(int(total // step) + 1)]
     if total - targets[-1] > 1:        # always include the destination
         targets.append(total)
