@@ -101,7 +101,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # CORS: allow the local React/Vite development server
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
-]
+    "http://127.0.0.1:5173",
+    "https://weather-truck-routing-app.onrender.com",
+] + [o for o in os.getenv("CORS_ORIGINS", "").split(",") if o]
 
 # Email (console backend for development)
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
