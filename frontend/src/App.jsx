@@ -3,7 +3,7 @@ import Sidebar from "./Sidebar";
 import MapView from "./MapView";
 import "./index.css";
 
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const API = import.meta.env.VITE_API_URL || "https://weather-truck-routing-pyq0.onrender.com";
 
 function defaultDeparture() {
   const d = new Date(Date.now() + 3600000);
