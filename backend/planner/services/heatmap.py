@@ -5,7 +5,7 @@ from .sampling import perpendicular_point, sample_route
 from .weather import value_at
 
 LATERAL_MI = 15        # how far each side of the route we sample
-MAX_POINTS = 90       # keeps the weather request and the JSON small
+MAX_POINTS = 60       # keeps the weather request and the JSON small
 HEATMAP_HOURS = 48
 
 

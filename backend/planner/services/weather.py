@@ -9,17 +9,18 @@ from django.core.cache import cache
 from .errors import UpstreamError
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
-CHUNK = 50                 # locations per request
-CACHE_SECONDS = 30 * 60    # forecasts change slowly, so 30 minutes is fine
-MAX_ATTEMPTS = 4           # tries per request when the API says "slow down"
+CHUNK = 40                 # locations per request
+CACHE_SECONDS = 60 * 60    # forecasts change slowly, so 1 hour is fine
+MAX_ATTEMPTS = 6           # tries per request when the API is busy
+RETRY_STATUSES = {429, 500, 502, 503, 504}
+PAUSE_BETWEEN_CHUNKS = 0.5
 
 
 def fetch_hourly(points, start_date, end_date):
     """Fetch hourly weather for many (lat, lon) points, in the same order.
 
-    Chunks of up to 50 locations are requested one at a time, because the
-    free API rejects parallel bursts. Results are cached, so repeats are fast.
-    Each result has: time[], wind_speed_10m[] (mph), rain[] (in), snowfall[] (in).
+    Chunks are requested one at a time (the free API rejects bursts).
+    Busy responses are retried with a growing wait. Results are cached.
     """
     results = []
     for i in range(0, len(points), CHUNK):
@@ -43,18 +44,22 @@ def _fetch_chunk(chunk, start_date, end_date):
     if data is None:
         data = _call_api(params)
         cache.set(key, data, CACHE_SECONDS)
+        time.sleep(PAUSE_BETWEEN_CHUNKS)
     return data
 
 
 def _call_api(params):
     for attempt in range(MAX_ATTEMPTS):
         try:
-            resp = requests.get(FORECAST_URL, params=params, timeout=25)
+            resp = requests.get(FORECAST_URL, params=params, timeout=30)
         except requests.RequestException as exc:
+            if attempt < MAX_ATTEMPTS - 1:
+                time.sleep(2 * (attempt + 1))
+                continue
             raise UpstreamError("Weather service is unreachable.") from exc
 
-        # 429 = "too many requests": wait 2s, 4s, 6s, then try again
-        if resp.status_code == 429 and attempt < MAX_ATTEMPTS - 1:
+        # Busy / overloaded: wait 2s, 4s, 6s, 8s, 10s then try again
+        if resp.status_code in RETRY_STATUSES and attempt < MAX_ATTEMPTS - 1:
             time.sleep(2 * (attempt + 1))
             continue
 
@@ -63,7 +68,9 @@ def _call_api(params):
                 reason = resp.json().get("reason", "")
             except ValueError:
                 reason = ""
-            raise UpstreamError(f"Weather service error ({resp.status_code}). {reason}".strip())
+            raise UpstreamError(
+                f"Weather service error ({resp.status_code}). {reason}".strip()
+            )
 
         data = resp.json()
         # One location returns a dict, several return a list: always use a list
