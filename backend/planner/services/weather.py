@@ -1,5 +1,6 @@
 import hashlib
 import json
+import time
 from datetime import datetime, timezone
 
 import requests
@@ -10,54 +11,64 @@ from .errors import UpstreamError
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 CHUNK = 50                 # locations per request
 CACHE_SECONDS = 30 * 60    # forecasts change slowly, so 30 minutes is fine
+MAX_ATTEMPTS = 4           # tries per request when the API says "slow down"
 
 
 def fetch_hourly(points, start_date, end_date):
-    """Fetch hourly weather for many (lat, lon) points.
+    """Fetch hourly weather for many (lat, lon) points, in the same order.
 
-    Returns one dict per point, in the same order as `points`.
-    Each dict has: time[], wind_speed_10m[] (mph), rain[] (in), snowfall[] (in).
+    Chunks of up to 50 locations are requested one at a time, because the
+    free API rejects parallel bursts. Results are cached, so repeats are fast.
+    Each result has: time[], wind_speed_10m[] (mph), rain[] (in), snowfall[] (in).
     """
     results = []
     for i in range(0, len(points), CHUNK):
-        chunk = points[i:i + CHUNK]
-        params = {
-            "latitude": ",".join(f"{lat:.3f}" for lat, _ in chunk),
-            "longitude": ",".join(f"{lon:.3f}" for _, lon in chunk),
-            "hourly": "wind_speed_10m,rain,snowfall",
-            "wind_speed_unit": "mph",
-            "precipitation_unit": "inch",
-            "timezone": "UTC",
-            "start_date": start_date,
-            "end_date": end_date,
-        }
-        # Stable cache key (Python's built-in hash() changes between runs)
-        key = "wx:" + hashlib.md5(json.dumps(params, sort_keys=True).encode()).hexdigest()
-        data = cache.get(key)
-        if data is None:
-            data = _call_api(params)
-            cache.set(key, data, CACHE_SECONDS)
-        results.extend(data)
+        results.extend(_fetch_chunk(points[i:i + CHUNK], start_date, end_date))
     return results
 
 
+def _fetch_chunk(chunk, start_date, end_date):
+    params = {
+        "latitude": ",".join(f"{lat:.3f}" for lat, _ in chunk),
+        "longitude": ",".join(f"{lon:.3f}" for _, lon in chunk),
+        "hourly": "wind_speed_10m,rain,snowfall",
+        "wind_speed_unit": "mph",
+        "precipitation_unit": "inch",
+        "timezone": "UTC",
+        "start_date": start_date,
+        "end_date": end_date,
+    }
+    key = "wx:" + hashlib.md5(json.dumps(params, sort_keys=True).encode()).hexdigest()
+    data = cache.get(key)
+    if data is None:
+        data = _call_api(params)
+        cache.set(key, data, CACHE_SECONDS)
+    return data
+
+
 def _call_api(params):
-    try:
-        resp = requests.get(FORECAST_URL, params=params, timeout=25)
-    except requests.RequestException as exc:
-        raise UpstreamError("Weather service is unreachable.") from exc
-
-    if resp.status_code != 200:
+    for attempt in range(MAX_ATTEMPTS):
         try:
-            reason = resp.json().get("reason", "")
-        except ValueError:
-            reason = ""
-        raise UpstreamError(f"Weather service error ({resp.status_code}). {reason}".strip())
+            resp = requests.get(FORECAST_URL, params=params, timeout=25)
+        except requests.RequestException as exc:
+            raise UpstreamError("Weather service is unreachable.") from exc
 
-    data = resp.json()
-    # One location returns a dict, several return a list: always use a list
-    data = data if isinstance(data, list) else [data]
-    return [item["hourly"] for item in data]
+        # 429 = "too many requests": wait 2s, 4s, 6s, then try again
+        if resp.status_code == 429 and attempt < MAX_ATTEMPTS - 1:
+            time.sleep(2 * (attempt + 1))
+            continue
+
+        if resp.status_code != 200:
+            try:
+                reason = resp.json().get("reason", "")
+            except ValueError:
+                reason = ""
+            raise UpstreamError(f"Weather service error ({resp.status_code}). {reason}".strip())
+
+        data = resp.json()
+        # One location returns a dict, several return a list: always use a list
+        data = data if isinstance(data, list) else [data]
+        return [item["hourly"] for item in data]
 
 
 def value_at(hourly, eta_utc):
