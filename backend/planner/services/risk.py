@@ -31,11 +31,19 @@ def assess(wind_mph, rain_in_hr, snow_in_hr, load_lb):
 
     Missing weather values (None) are treated as 0, meaning Low.
     """
-    wind = wind_mph or 0
-    rain = rain_in_hr or 0
-    snow = snow_in_hr or 0
-    load = load_lb or 0
 
+    if wind_mph is None or rain_in_hr is None or snow_in_hr is None:
+        raise ValueError(
+            "Cannot calculate weather risk when a weather measurement is missing."
+        )
+
+    if load_lb is None:
+        raise ValueError("Load weight is required to calculate weather risk.")
+
+    wind = wind_mph
+    rain = rain_in_hr
+    snow = snow_in_hr
+    load = load_lb
     wind_lvl = band(wind, WIND)
     rain_lvl = band(rain, RAIN, top_inclusive=True)
     snow_lvl = band(snow, SNOW, top_inclusive=True)

@@ -79,10 +79,54 @@ def _call_api(params):
 
 
 def value_at(hourly, eta_utc):
-    """Return (wind_mph, rain_in_hr, snow_in_hr) for the hour closest to eta_utc."""
-    first = datetime.fromisoformat(hourly["time"][0]).replace(tzinfo=timezone.utc)
-    idx = round((eta_utc - first).total_seconds() / 3600)
-    idx = max(0, min(idx, len(hourly["time"]) - 1))   # clamp to the data we have
-    return (hourly["wind_speed_10m"][idx],
-            hourly["rain"][idx],
-            hourly["snowfall"][idx])
+    """Return weather at the nearest forecast hour.
+
+    Never substitute another hour or zero values when the required
+    forecast is missing or outside the available forecast range.
+    """
+    if not hourly or not hourly.get("time"):
+        raise UpstreamError("Weather forecast data is missing.")
+
+    times = hourly["time"]
+
+    try:
+        first = datetime.fromisoformat(times[0].replace("Z", "+00:00"))
+        if first.tzinfo is None:
+            first = first.replace(tzinfo=timezone.utc)
+        else:
+            first = first.astimezone(timezone.utc)
+
+        eta_utc = eta_utc.astimezone(timezone.utc)
+    except (ValueError, AttributeError) as exc:
+        raise UpstreamError("Weather forecast timestamps are invalid.") from exc
+
+    hours_from_first = (eta_utc - first).total_seconds() / 3600
+    idx = round(hours_from_first)
+
+    if idx < 0 or idx >= len(times):
+        raise UpstreamError(
+            "Weather forecast does not cover a checkpoint ETA. "
+            "Please try a departure time within the available forecast."
+        )
+
+    required_fields = ("wind_speed_10m", "rain", "snowfall")
+    values = []
+
+    for field in required_fields:
+        series = hourly.get(field)
+
+        if not isinstance(series, list) or idx >= len(series):
+            raise UpstreamError(
+                f"Weather forecast is missing the required field: {field}."
+            )
+
+        value = series[idx]
+
+        if value is None:
+            raise UpstreamError(
+                f"Weather forecast has no {field} value for a checkpoint ETA."
+            )
+
+        values.append(value)
+
+    return tuple(values)
