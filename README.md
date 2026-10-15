@@ -1,156 +1,251 @@
+
 # Weather-Aware Truck Routing
 
-React + Django app that helps a truck driver pick the safest route using weather
-along the route, load weight, and travel time.
+A full-stack web application that helps truck drivers compare route alternatives using travel time, distance, weather conditions, and weather-related driving risk.
 
-- **Live app:** https://YOUR-APP.vercel.app
-- **API:** https://YOUR-APP.onrender.com/api/ping/
-- **Demo video:** YOUR_LOOM_LINK
+The application combines route planning, checkpoint-level weather analysis, risk-based route recommendations, an interactive map, and a time-based weather forecast heatmap.
 
-> The backend runs on Render's free tier and sleeps when idle. The first request
-> can take ~50 s to wake it up.
+## Live Demo
 
-## What it does
+- **Live Application:** https://weather-truck-routing-app.onrender.com
+- **Backend API:** https://weather-truck-routing-pyq0.onrender.com/
+- **GitHub Repository:** https://github.com/AnUsHkAIT/weather-truck-routing
 
-The user enters origin, destination, departure date/time and load weight. The app:
+## Features
 
-1. Geocodes both addresses and generates 3 route options.
-2. Places checkpoints along each route and computes the truck's ETA at each one.
-3. Fetches the forecast for each checkpoint **at its ETA** (not at departure).
-4. Classifies each checkpoint (Low / Moderate / High / Severe / No Travel) using the
-   wind, rain, snow and load rules.
-5. Ranks the routes and recommends one, with a written reason.
-6. Shows routes, risk-colored checkpoints, ETAs and summaries on a map, plus a
-   0-48 hour weather heatmap with a slider.
+- **Route planning:** Enter an origin, destination, departure date and time, and truck load weight.
+- **Multiple route alternatives:** Compare three available route options by distance, estimated travel time, and arrival time.
+- **Weather-aware recommendations:** Rank routes using weather-related risk, higher-risk mileage, and travel duration.
+- **Checkpoint weather analysis:** View estimated arrival times, wind speed, rainfall, snowfall, and risk classifications at points along a route.
+- **Risk classification:** Categorize weather conditions into Low, Moderate, High, Severe, and No Travel levels according to the configured risk rules.
+- **Load-aware risk assessment:** Incorporate truck load weight into applicable weather-risk calculations.
+- **Interactive route map:** View route alternatives and checkpoints on a map.
+- **Weather forecast heatmap:** Explore forecast conditions over time using an interactive slider.
+- **Dynamic recalculation:** Update route alternatives and map results when trip inputs change.
+- **Input and forecast validation:** Reject invalid inputs and handle missing required weather measurements or forecast times outside the available data range.
 
-## Stack
+## Technology Stack
 
-| Part | Choice |
+### Frontend
+- React
+- Vite
+- JavaScript
+- Leaflet and React Leaflet
+- Leaflet heatmap visualization
+
+### Backend
+- Python
+- Django
+- Django REST Framework
+
+### External Services
+- Mapbox for geocoding and route directions
+- Open-Meteo for weather forecast data
+- OpenStreetMap map tiles and map data attribution
+
+### Deployment
+- Render for the hosted frontend and backend
+- GitHub for source control
+
+## How It Works
+
+1. **Enter trip details.** Provide the origin, destination, departure date and time, and truck load weight.
+2. **Generate route alternatives.** The backend obtains available route options and their distances and travel durations.
+3. **Estimate checkpoint arrival times.** The application estimates when the truck reaches checkpoints along each route.
+4. **Retrieve weather data.** Weather conditions are evaluated against the estimated arrival times.
+5. **Calculate weather-related risk.** The backend applies the configured risk rules to the available weather measurements and relevant load information.
+6. **Compare route alternatives.** Routes are evaluated using risk severity and mileage, average risk, and travel time.
+7. **Display the results.** The frontend presents route summaries, checkpoint weather details, the interactive map, and the weather forecast heatmap.
+
+## Route Recommendation
+
+The application compares routes using a safety-first approach.
+
+The recommendation considers:
+- Mileage associated with No Travel conditions
+- Severe-risk mileage
+- High-risk mileage
+- Average route risk
+- Estimated travel time
+
+When routes have comparable risk metrics, shorter travel time can help determine the recommended option.
+
+The recommendation is based on the application's configured risk rules and the weather data available for the evaluated trip.
+
+## Weather Risk Assessment
+
+Weather conditions are evaluated at route checkpoints using the available forecast data, including:
+
+- Wind speed
+- Rainfall
+- Snowfall
+- Estimated checkpoint arrival time
+- Truck load weight, where applicable to the configured rules
+
+The application classifies risk into five categories:
+
+| Category | Meaning |
 |---|---|
-| Frontend | React (Vite), react-leaflet, leaflet.heat |
-| Backend | Django, Django REST Framework |
-| Routing + geocoding | Mapbox Directions / Geocoding |
-| Weather | Open-Meteo (free, hourly, mph and inch units) |
-| Hosting | Render (API), Vercel (frontend) |
+| Low | Lower weather-related driving risk |
+| Moderate | Conditions requiring additional caution |
+| High | Elevated weather-related driving risk |
+| Severe | Serious weather-related driving risk |
+| No Travel | Conditions classified by the configured rules as unsuitable for travel |
 
-## Architecture
+Risk classifications depend on the implemented thresholds and available weather measurements. Missing required weather data is not automatically treated as safe.
 
+## Local Development
+
+### Prerequisites
+
+Install the following:
+
+- Python 3.10 or a compatible version supported by the project
+- Node.js and npm
+- Git
+- A Mapbox access token for routing and geocoding functionality
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/AnUsHkAIT/weather-truck-routing.git
+cd weather-truck-routing
 ```
-POST /api/plan/
-  geocode -> get_routes -> sample_route (checkpoints + ETAs)
-          -> fetch_hourly (batched weather) -> analyze_route (risk per checkpoint)
-          -> recommend -> build_heatmap -> JSON
-```
 
-All logic lives in `backend/planner/services/`; the view only handles HTTP.
+### 2. Set up the backend
 
-| File | Responsibility |
-|---|---|
-| `risk.py` | Threshold and load rules for one checkpoint |
-| `sampling.py` | Haversine distance, checkpoint spacing, ETAs |
-| `weather.py` | Batched Open-Meteo calls, retries, 1 h cache |
-| `analysis.py` | Risk per checkpoint, miles per risk level |
-| `recommend.py` | Route ranking and explanation text |
-| `routing.py` | Mapbox routes, de-duplication, detour fallback |
-| `heatmap.py` | Corridor points and 49 hourly risk levels |
-
-## Risk rules
-
-Thresholds are taken exactly from the task. The worst of wind, rain and snow wins,
-then the load rules can only raise the level:
-
-- Wind >= 55 mph: No Travel for any load
-- Wind 45-54 mph and load > 30,000 lb: No Travel
-- Wind 35-44 mph and load > 40,000 lb: Severe
-
-**Boundary decision:** the table overlaps at values like 0.25 in/hr. Lower bounds are
-inclusive, so 0.25 is High. "No Travel" for rain and snow is written as `> 1.00` and
-`> 3.0`, so exactly 1.00 in/hr rain is still Severe. Wind No Travel is `>= 55`.
-Every threshold is unit tested on both sides.
-
-## Route recommendation
-
-Routes are compared in this order (lexicographic tuple, lowest wins):
-
-1. **No Travel miles** (my addition: worse than Severe, so it comes first)
-2. Severe miles
-3. High miles
-4. Average risk (0 = Low ... 4 = No Travel, mile-weighted)
-5. Travel time
-
-Miles are rounded to whole miles before comparing, so checkpoint-spacing noise
-(for example 0.4 mi) can't decide a winner. Each checkpoint "owns" the road halfway
-to its neighbours, which is how miles per risk level are computed. The winning
-route gets a sentence such as "Route B: High miles 0 vs 50 on Route A".
-
-## Assumptions
-
-- **ETA is proportional to distance:** a checkpoint 40% of the way is reached 40%
-  of the way through the drive time. A refinement would use per-step durations.
-- **Truck speed:** Mapbox's driving profile uses car speeds, so average speed is
-  capped at 55 mph (`TRUCK_MAX_AVG_MPH` in `routing.py`).
-- **Checkpoint spacing:** 10 mi for trips up to 200 mi, 25 mi up to 600 mi, 50 mi
-  beyond. This keeps weather lookups to roughly 20-60 per route.
-- **Weather:** hourly sustained 10 m wind, rain, and snowfall from Open-Meteo, treated as
-  in/hr for that hour. The nearest forecast hour to the ETA is used. Gusts are
-  not used.
-- **3 routes:** Mapbox often returns only 2. A third is forced by routing through a
-  point offset perpendicular to the midpoint. Near-duplicate routes are removed.
-- Missing weather values default to Low.
-- Trips are US only (mph and inches).
-
-## Performance
-
-- Weather for all route checkpoints and the heatmap corridor is requested in batched
-  calls and cached for an hour.
-- The heatmap for all 49 hours (0-48) is computed once on the server and sent with
-  the response, so the slider only swaps data in the browser: no refetch.
-- Route geometry is thinned before sending.
-
-## Run locally
-
-Backend:
+Open a terminal in the project root:
 
 ```bash
 cd backend
 python -m venv venv
-venv\Scripts\activate        # Mac/Linux: source venv/bin/activate
+```
+
+Activate the virtual environment.
+
+**Windows PowerShell:**
+
+```powershell
+.\venv\Scripts\Activate.ps1
+```
+
+**macOS/Linux:**
+
+```bash
+source venv/bin/activate
+```
+
+Install the backend dependencies:
+
+```bash
 pip install -r requirements.txt
-cp .env.example .env         # add your MAPBOX_TOKEN
-python manage.py test planner
+```
+
+Configure the required backend environment variables using the project's environment example and Django settings. Add your Mapbox access token and any other required configuration. Do not commit secrets to GitHub.
+
+Apply migrations:
+
+```bash
+python manage.py migrate
+```
+
+Start the development server:
+
+```bash
 python manage.py runserver
 ```
 
-Frontend:
+The backend should now be available at:
+
+http://127.0.0.1:8000/
+
+### 3. Set up the frontend
+
+Open a second terminal and navigate to the frontend directory:
 
 ```bash
 cd frontend
 npm install
-npm run dev                  # http://localhost:5173
 ```
 
-Environment variables:
+Configure the frontend API base URL using the variable documented in the frontend environment example. For local development, it should point to the local Django backend.
 
-| Name | Where | Purpose |
-|---|---|---|
-| `MAPBOX_TOKEN` | backend | Routing and geocoding |
-| `SECRET_KEY`, `DEBUG` | backend | Django settings |
-| `CORS_ORIGINS` | backend | Comma-separated allowed frontend origins |
-| `VITE_API_URL` | frontend | Backend base URL (build time) |
+Start the development server:
 
-## Tests
+```bash
+npm run dev
+```
 
-`python manage.py test planner` covers every risk threshold on both sides, the load
-rules, checkpoint spacing and ETAs, owned-miles math, route ranking order, duplicate
-detection, heatmap shape, and API validation and error codes (400 / 502). External
-APIs are mocked, so tests run offline.
+Open the local URL printed by Vite in the terminal.
 
-## Known limitations
+> Note: If your frontend directory or environment-variable names differ, follow the actual project structure and the provided `.env.example` file.
 
-- Mapbox's driving profile is not truck-specific (no height, weight or hazmat
-  restrictions); only the average speed is capped.
-- Forecast covers about 16 days, so departures are limited to 13 days ahead to
-  leave room for the 48-hour heatmap.
-- Open-Meteo's free tier can return 429/503 when busy; the backend retries with
-  backoff, but a trip may occasionally fail and need a retry.
-- Heatmap uses about 60 sample points, so it is a coarse corridor view.
+## Running Tests
+
+From the backend directory, activate the virtual environment and run:
+
+```bash
+python manage.py test planner
+```
+
+Run Django's system check with:
+
+```bash
+python manage.py check
+```
+
+The project's backend test suite covers route-planning and weather-risk functionality, including validation of weather inputs and risk calculations.
+
+## Deployment
+
+The application is deployed using Render.
+
+- Frontend: https://weather-truck-routing-app.onrender.com
+- Backend: https://weather-truck-routing-pyq0.onrender.com/
+
+For deployment, configure the frontend API base URL to point to the deployed backend. Configure the backend's required environment variables, allowed hosts, and CORS settings in Render.
+
+Keep API tokens and other secrets in environment variables rather than committing them to the repository.
+
+After deploying new changes, verify that the backend is live and that the frontend can successfully request route-planning results.
+
+## Project Structure
+
+The repository contains the React frontend and Django backend.
+
+```text
+weather-truck-routing/
+├── backend/
+│   ├── config/
+│   ├── planner/
+│   │   ├── services/
+│   │   └── tests/
+│   ├── manage.py
+│   └── requirements.txt
+├── frontend/
+│   └── ...
+├── .gitignore
+└── README.md
+```
+
+The backend contains the route-planning API, weather and risk-analysis services, and automated tests. The frontend contains the trip input form, route comparison interface, map, checkpoint information, and forecast heatmap.
+
+## Limitations
+
+- Weather results depend on the coverage, availability, and time range of the external forecast service.
+- Estimated arrival times and checkpoint weather conditions may differ from actual conditions during a trip.
+- Risk classifications depend on the implemented thresholds and available weather measurements.
+- Route availability depends on the routing service and the locations supplied.
+- This application is a route-planning aid, not a substitute for official road closures, current weather warnings, applicable driving regulations, or professional safety judgment.
+
+## Future Improvements
+
+- Add more detailed truck-specific restrictions, including height, weight, and hazardous-material constraints.
+- Incorporate live traffic and road-closure data.
+- Expand weather-risk validation using additional scenarios and forecast conditions.
+- Improve route comparison with additional operational costs and fuel-consumption estimates.
+- Add historical trip analysis and downloadable route reports.
+
+## License
+
+No license has been specified for this project. Contact the repository owner for permission before redistributing or reusing the code.
